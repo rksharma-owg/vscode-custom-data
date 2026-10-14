@@ -1,0 +1,78 @@
+name: CSS description fork preflight
+on:
+  push:
+    branches: [codex/preflight-custom-data126]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: driver
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b992d1c092aa49e60966c861f0e3805302e07530
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 01df47ad7cc0b140624fc941ff57618c36ed46a1
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vscode-css-languageservice
+          ref: 2a253759802c9aba0d71b30e369fb65f1f062b5c
+          path: consumer
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify exact contribution and baseline
+        working-directory: candidate
+        run: |
+          test "$(git rev-parse HEAD)" = b992d1c092aa49e60966c861f0e3805302e07530
+          git merge-base --is-ancestor 01df47ad7cc0b140624fc941ff57618c36ed46a1 HEAD
+          git merge --no-commit 01df47ad7cc0b140624fc941ff57618c36ed46a1
+          git diff --exit-code
+          node --version
+          npm --version
+      - name: Test committed source and generated descriptions
+        working-directory: candidate/web-data
+        run: |
+          node --test
+          npm pack --dry-run --ignore-scripts
+      - name: Generate candidate data with locked dependencies
+        working-directory: candidate/web-data
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run generate-data
+          node --test
+      - name: Generate baseline data with locked dependencies
+        working-directory: baseline/web-data
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run generate-data
+      - name: Verify generated differential
+        run: node driver/.github/validation/check-generation.mjs
+      - name: Build pinned consumer
+        working-directory: consumer
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+      - name: Verify public hover API before and after
+        run: |
+          node driver/.github/validation/hover-check.mjs "$PWD/consumer" baseline/web-data/data/browsers.css-data.json baseline
+          node driver/.github/validation/hover-check.mjs "$PWD/consumer" candidate/web-data/data/browsers.css-data.json patched
